@@ -1,0 +1,125 @@
+---
+title: "Packages problem"
+author: "Andrea Berardi"
+date: "22 October 2019"
+output: html_document
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(magrittr)
+library(DT)
+```
+
+## Problem
+
+I have a number of objects to package and want to minimize the cost of paying for weight I do not need using the minimum number possible of package sizes. Assumption: pack sizes are integer. 
+
+The minimum cost of air will be the nearest integer to the item size. Judgement on the optimal number of pack sizes is arbitrary, as it presumes knoweldge of the average willingness to pay for air per pack, compared to the implementation costs for the number of pack sizes.
+
+Here we assume that the cost per pack has a linear relationship with the pack size - this is completely arbitrary and should be adapted as needed.
+
+The algorithm first initializes with pack sizes all equal to the ceiling integer for each item. Pack sizes are discarded one by one, discarding the one that minimizes the cost of air among the possible choices. It should be noted that under this assumption the largest package will always be the ceiling integer to the largest pack size. This should ideally be set manually instead to a reasonable size which would not prevent unexpectedly large items to be packed.
+
+```{r}
+# data simulation
+set.seed(1234)
+hist_data = rgamma(1000, 7.5, 1)
+new_data = rgamma(100, 7.5, 1)
+
+# assuming a simple linear regression of cost over size
+cost_per_size = function(size) {
+  10 + size * 5
+}
+
+train_data = sort(hist_data)
+init_packs = unique(ceiling(train_data))
+
+# initial data points
+tree = list()
+tree[[1]] = list(train_data, init_packs)
+
+# allocate packages functions
+select_pack = function(item, sizes) {
+  ret = 
+    sapply(
+      sizes,
+      function(x, item) {
+        ifelse(x - item < 0, NA, x - item)
+      },
+      item)
+  if (all(is.na(ret)))
+    return(NA)
+  which.min(ret)
+}
+
+cost_extra = function(items, alloc, costs = pack_data$cost, cost_fun = cost_per_size) {
+  theoretical_cost_item = cost_fun(items)
+  pack_cost = costs[alloc]
+  NA_costs = is.na(pack_cost)
+  pack_cost[NA_costs] = 10000000
+  air_cost = pack_cost - theoretical_cost_item
+  return(sum(air_cost))
+}
+
+alloc_pack = function(content, sizes) {
+  sapply(content, select_pack, sizes)
+}
+
+alloc_var_pack = function(pack_sizes, cost_per_size, items, round = FALSE) {
+  n_packs = length(pack_sizes)
+  if (round) {pack_sizes = ceiling(pack_sizes)}
+  pack_costs = cost_per_size(pack_sizes)
+  alloc = alloc_pack(items, pack_sizes)
+  cost_extra(items, alloc, pack_costs, cost_per_size)
+}
+
+find_next_cluster = function(packs, boxes) {
+  costs = sapply(1:length(boxes), function(x) {
+    # print(boxes[-x])
+    alloc_var_pack(boxes[-x], cost_per_size, train_data)})
+  # print(costs)
+  return(costs)
+}
+
+step_packs = list(init_packs)
+x = list(find_next_cluster(train_data, step_packs[[1]]))
+step_packs[[2]] = step_packs[[1]][-which.min(x[[1]])]
+for (i in 2:(length(init_packs) - 1)) {
+  x[[i]] = find_next_cluster(train_data, step_packs[[i]])
+  step_packs[[i + 1]] = step_packs[[i]][-which.min(x[[i]])] 
+}
+
+final_costs = 
+  sapply(
+    step_packs,
+    alloc_var_pack,
+    cost_per_size,
+    hist_data
+  ) / length(hist_data)
+
+newdata_costs = 
+  sapply(
+    step_packs,
+    alloc_var_pack,
+    cost_per_size,
+    new_data
+  ) / length(new_data)
+
+results = data.frame(
+  "Number of pack sizes" = sapply(step_packs, length),
+  "Training data cost of air" = final_costs,
+  "Validation data cost of air" = newdata_costs, 
+  check.names = FALSE
+)
+
+plot(results[,c(1,2)], type = "l", ylab = "Cost of air", xlab = "Number of pack sizes")
+
+plot(results[,c(1,3)], type = "l", ylab = "Cost of air", xlab = "Number of pack sizes")
+
+# pack sizes step by step:
+step_packs
+
+# average cost of air by number of pack sizes, using historical and new data
+datatable(results)
+```
